@@ -89,6 +89,16 @@ COPY --chown=nextjs:nodejs docker/staff-ui/assets/patch-dashboard-nav.js /tmp/pa
 RUN DASHBOARD_URL="${DASHBOARD_URL}" DASHBOARD_LABEL="${DASHBOARD_LABEL}" \
     node /tmp/patch-dashboard-nav.js
 
+# ── Enable sibling-table / widget-autofill / age-from-date data sources ────
+# The pinned platform's widget runtime has no code for the `sibling-table`,
+# `widget-autofill` or `widget-age-from-date` data-source keys this registry's
+# section UI schemas declare (Livestock Ear Tag pickers, the Species/Age
+# autofill that follows one, and the Age field that derives itself from Date
+# of Birth). Without this, those dropdowns render empty and Age never
+# populates. See the patch file's header for the full mechanism.
+COPY --chown=nextjs:nodejs docker/staff-ui/assets/patch-sibling-table.js /tmp/patch-sibling-table.js
+RUN node /tmp/patch-sibling-table.js
+
 # ── Rename the attribute-value "Sort Order" field label to "Display Order" ──
 # Configuration -> Attributes (and Configuration -> Registry -> Languages,
 # which shares the same i18n key) label the g2p_attribute_values.sort_order
