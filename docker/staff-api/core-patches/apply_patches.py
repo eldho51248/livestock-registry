@@ -1239,6 +1239,35 @@ apply(
     "g2p_awe_webhook_service.py: call post_approval_stage on final approval",
 )
 
+# ─── Fix 7: stamp submission_id onto every row of a section's payload before
+# domain validation runs. Without this, validate_domain_attributes only ever
+# sees whatever the frontend's dialog-table widget sent — which, for a
+# TABLE register like Animal, is built purely from that dialog's configured
+# columns, none of which is submission_id. So a row already saved once in
+# this same draft resubmits with no submission_id (and no internal_record_id
+# either — same gap) on every later save. The livestock extension's
+# _validate_no_duplicate_ear_tags relies on submission_id being present to
+# recognise "this row already exists in MY OWN draft, don't flag it as
+# belonging to a different animal" (see domain_validation_utils.py's
+# ear_tag_used_by_other_animal) — without it, revisiting the Livestock
+# Details section and clicking Next again (no edits) falsely reports the
+# ear tag as already registered to a different animal, blocking Next until
+# the tag is changed to something that no longer matches. `submission` is
+# already resolved a few lines above (used for existing_rows/upsert right
+# after), so this only reads state already in scope — it doesn't change
+# what get upserted, only what validate_domain_attributes sees first.
+apply(
+    f"{BASE}/services/intake_form_data_service.py",
+    '''        if domain_service:
+            await domain_service.validate_domain_attributes(section_payload or [])''',
+    '''        if domain_service:
+            for _record in section_payload or []:
+                if isinstance(_record, dict):
+                    _record.setdefault("submission_id", submission.submission_id)
+            await domain_service.validate_domain_attributes(section_payload or [])''',
+    "intake_form_data_service.py: stamp submission_id before validate_domain_attributes",
+)
+
 # ─── Fix 6: CSRF-exempt the livestock extension's approver-resolver endpoint
 # (register_domain/controllers/g2p_approver_resolver_controller.py) — AWE's
 # own "http" approver-rule caller (awe/services/resolver.py::_resolve_http)

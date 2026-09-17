@@ -146,6 +146,7 @@ async def ear_tag_used_by_other_animal(
     species,
     breed,
     exclude_internal_record_ids: set[str] | None = None,
+    exclude_submission_id: str | None = None,
 ) -> bool:
     """True if `ear_tag_id`, with this same species and breed, already
     belongs to a DIFFERENT animal — either already approved into the
@@ -167,6 +168,24 @@ async def ear_tag_used_by_other_animal(
     editing Health Status on an already-approved animal raised
     "ear_tag_id ... is already registered to a different animal" even though
     nothing about the tag, species or breed had changed.)
+
+    `exclude_submission_id` covers a second, DRAFT-only gap: the Livestock
+    Details section's own "Add record" dialog builds each row from just its
+    configured columns, so a row the frontend already saved once (as part of
+    this same intake submission) resubmits with no internal_record_id at
+    all — there's nowhere in that dialog's column config for one to ride
+    along on. Without this, revisiting the section and clicking Next again
+    (no edits) resends that same row id-less, `exclude_internal_record_ids`
+    ends up empty, and the row's own already-saved g2p_intake_form_animals
+    copy gets found and reported as "a different animal" — permanently
+    blocking Next until the ear tag is changed to something that no longer
+    matches. Scoping to this submission_id is safe here in a way it isn't for
+    internal_record_id: a genuine same-tag/species/breed collision between two
+    DIFFERENT animals within the very same submission is still caught by the
+    `seen` dict in `_validate_no_duplicate_ear_tags`, which runs first and
+    scopes purely to the current request's own row list, independent of the
+    DB. Only ever applied to g2p_intake_form_animals — g2p_register_animals
+    rows have no submission_id to match against.
     """
     if is_blank(ear_tag_id):
         return False
@@ -178,7 +197,7 @@ async def ear_tag_used_by_other_animal(
     G2PRegisterAnimal, G2PIntakeFormAnimal = _animal_models()
     exclude_internal_record_ids = exclude_internal_record_ids or set()
 
-    def _same_animal_key(model):
+    def _same_animal_key(model, *, scope_to_submission=False):
         conditions = [
             model.ear_tag_id == ear_tag_id,
             model.species == species,
@@ -186,6 +205,8 @@ async def ear_tag_used_by_other_animal(
         ]
         if exclude_internal_record_ids:
             conditions.append(model.internal_record_id.not_in(exclude_internal_record_ids))
+        if scope_to_submission and exclude_submission_id:
+            conditions.append(model.submission_id != exclude_submission_id)
         return and_(*conditions)
 
     session_maker = async_sessionmaker(dbengine.get(), expire_on_commit=False)
@@ -197,7 +218,9 @@ async def ear_tag_used_by_other_animal(
             return True
 
         in_intake = (
-            await session.execute(select(exists().where(_same_animal_key(G2PIntakeFormAnimal))))
+            await session.execute(
+                select(exists().where(_same_animal_key(G2PIntakeFormAnimal, scope_to_submission=True)))
+            )
         ).scalar()
         return bool(in_intake)
 
@@ -207,6 +230,7 @@ async def secondary_identifier_used_by_other_animal(
     species,
     breed,
     exclude_internal_record_ids: set[str] | None = None,
+    exclude_submission_id: str | None = None,
 ) -> bool:
     """Same check as ear_tag_used_by_other_animal, for `secondary_identifier`
     — the leg band/wing tag/hive number an _EAR_TAG_EXEMPT_SPECIES animal
@@ -214,7 +238,8 @@ async def secondary_identifier_used_by_other_animal(
     instead of an ear tag. Kept as a separate function rather than a
     parameterized field name so each stays a straightforward, obviously
     correct mirror of the other — see that function's docstring for why the
-    exclude_internal_record_ids scoping (and its ear-tag-only caveat) matter.
+    exclude_internal_record_ids and exclude_submission_id scoping (and the
+    internal_record_id one's ear-tag-only caveat) matter.
     """
     if is_blank(secondary_identifier):
         return False
@@ -226,7 +251,7 @@ async def secondary_identifier_used_by_other_animal(
     G2PRegisterAnimal, G2PIntakeFormAnimal = _animal_models()
     exclude_internal_record_ids = exclude_internal_record_ids or set()
 
-    def _same_animal_key(model):
+    def _same_animal_key(model, *, scope_to_submission=False):
         conditions = [
             model.secondary_identifier == secondary_identifier,
             model.species == species,
@@ -234,6 +259,8 @@ async def secondary_identifier_used_by_other_animal(
         ]
         if exclude_internal_record_ids:
             conditions.append(model.internal_record_id.not_in(exclude_internal_record_ids))
+        if scope_to_submission and exclude_submission_id:
+            conditions.append(model.submission_id != exclude_submission_id)
         return and_(*conditions)
 
     session_maker = async_sessionmaker(dbengine.get(), expire_on_commit=False)
@@ -245,7 +272,9 @@ async def secondary_identifier_used_by_other_animal(
             return True
 
         in_intake = (
-            await session.execute(select(exists().where(_same_animal_key(G2PIntakeFormAnimal))))
+            await session.execute(
+                select(exists().where(_same_animal_key(G2PIntakeFormAnimal, scope_to_submission=True)))
+            )
         ).scalar()
         return bool(in_intake)
 

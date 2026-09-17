@@ -166,12 +166,25 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
            `ear_tag_used_by_other_animal` DB check, which excludes this
            submission's own rows so re-saving an animal you already
            registered isn't flagged as a duplicate of itself.
+
+        `submission_id` is also passed through: the Livestock Details
+        dialog's own rows never carry internal_record_id at all (it isn't one
+        of the dialog's configured columns), so a row already saved once in
+        this same draft resubmits id-less on every later save. Without also
+        excluding by submission_id, that row's earlier copy in
+        g2p_intake_form_animals gets found and reported as belonging to "a
+        different animal", permanently blocking Next on revisiting the
+        section unless the ear tag is changed. See that function's docstring
+        for why this scoping is safe.
         """
         self_ids = {
             str(record["internal_record_id"])
             for record in records
             if record.get("internal_record_id")
         }
+        submission_id = next(
+            (record.get("submission_id") for record in records if record.get("submission_id")), None
+        )
 
         seen: dict[tuple, str] = {}
         for record in records:
@@ -191,6 +204,7 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
                 record.get("species"),
                 record.get("breed"),
                 exclude_internal_record_ids=self_ids,
+                exclude_submission_id=submission_id,
             ):
                 validation_error(
                     f"ear_tag_id '{ear_tag_id}' is already registered to a different "
@@ -205,12 +219,19 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
         species' record simply never has one, and _validate_identifier_required
         already rejected a missing one for a species that needed it before
         this runs.
+
+        Also scoped by submission_id, for the same reason
+        _validate_no_duplicate_ear_tags is — see that method's and
+        secondary_identifier_used_by_other_animal's docstrings.
         """
         self_ids = {
             str(record["internal_record_id"])
             for record in records
             if record.get("internal_record_id")
         }
+        submission_id = next(
+            (record.get("submission_id") for record in records if record.get("submission_id")), None
+        )
 
         seen: dict[tuple, str] = {}
         for record in records:
@@ -230,6 +251,7 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
                 record.get("species"),
                 record.get("breed"),
                 exclude_internal_record_ids=self_ids,
+                exclude_submission_id=submission_id,
             ):
                 validation_error(
                     f"secondary_identifier '{secondary_identifier}' is already "
